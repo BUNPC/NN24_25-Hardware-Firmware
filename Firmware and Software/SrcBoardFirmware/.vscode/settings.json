@@ -1,0 +1,5 @@
+{
+    "files.associations": {
+        "led_sel_fsm.pio.h": "c"
+    }
+}

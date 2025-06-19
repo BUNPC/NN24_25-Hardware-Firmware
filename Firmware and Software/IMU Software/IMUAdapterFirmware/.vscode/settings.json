@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "stdlib.h": "c",
+        "pico.h": "c",
+        "platform.h": "c",
+        "stdio.h": "c",
+        "uart_rx.pio.h": "c",
+        "ctrl_board_pins.h": "c",
+        "time.h": "c"
+    }
+}

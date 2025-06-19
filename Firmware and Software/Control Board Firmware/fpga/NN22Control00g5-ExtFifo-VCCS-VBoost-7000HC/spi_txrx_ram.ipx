@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DiamondModule name="spi_txrx_ram" module="RAM_DP_TRUE" VendorName="Lattice Semiconductor Corporation" generator="IPexpress" date="2024 10 17 01:09:15.830" version="7.5" type="Module" synthesis="synplify" source_format="VHDL">
+  <Package>
+		<File name="" type="" modified="2024 10 17 01:09:15.579"/>
+		<File name="spi_txrx_ram.lpc" type="lpc" modified="2024 10 17 01:09:13.233"/>
+		<File name="spi_txrx_ram.vhd" type="top_level_vhdl" modified="2024 10 17 01:09:13.266"/>
+		<File name="spi_txrx_ram_tmpl.vhd" type="template_vhdl" modified="2024 10 17 01:09:13.266"/>
+		<File name="tb_spi_txrx_ram_tmpl.vhd" type="testbench_vhdl" modified="2024 10 17 01:09:13.267"/>
+  </Package>
+</DiamondModule>

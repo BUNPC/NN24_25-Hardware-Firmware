@@ -1,0 +1,56 @@
+// ---  NinjaNIRS 2022  ---
+// UART receiver to receive data from IMU boards
+
+// Initial version: 2024-04-11
+// Bernhard Zimmermann - bzim@bu.edu
+// Boston University Neurophotonics Center
+
+// Adapted from Raspberry Pi RP2040 datasheet example
+
+// IN pin 0 and JMP pin are both mapped to the GPIO used as UART receiver
+
+.program uart_rx
+//.side_set 1
+.wrap_target
+    set y, 1           // read in two bytes per word 
+byteloop:
+    wait 1 pin 0
+    wait 0 pin 0       // detect falling edge of start bit
+    set x, 7    [22]   // Preload bit counter, then delay until halfway through
+bitloop:               // the first data bit (24 cycles incl wait, set).
+    in pins, 1 [14]     // Shift data bit into ISR
+    jmp x-- bitloop    // Loop 8 times, each loop iteration is 16 cycles
+    jmp y-- byteloop
+PUBLIC uart_push:
+    push block
+.wrap
+
+    
+% c-sdk {
+
+static inline void uart_rx_program_init(PIO pio, uint sm, uint offset, uint pin, uint baud) {
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+    pio_gpio_init(pio, pin);
+    gpio_pull_up(pin);
+
+    //pio_gpio_init(pio, dbg_pin);
+    //pio_sm_set_consecutive_pindirs(pio, sm, dbg_pin, 1, true);
+
+    pio_sm_config c = uart_rx_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, pin); // for WAIT, IN
+    sm_config_set_jmp_pin(&c, pin); // for JMP
+    //sm_config_set_sideset_pins(&c, dbg_pin);
+    sm_config_set_in_shift(&c, true, false, 32); // Shift to right, autopush disabled
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    // SM receives 1 bit per 16 execution cycles.
+    uint16_t div_int = clock_get_hz(clk_sys) / (16 * baud);
+    // TODO : check div_int result
+    sm_config_set_clkdiv_int_frac(&c, div_int, 0);
+    
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
+
+

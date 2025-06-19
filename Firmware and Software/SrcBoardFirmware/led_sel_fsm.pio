@@ -1,0 +1,146 @@
+// ---  NinjaNIRS 2024  ---
+// PIO programs for NN22_VCCS_SrcAdapter01_s01 board
+// to control the LEDs
+
+// Initial version: 2024-7-28
+// Bernhard Zimmermann - bzim@bu.edu
+// Boston University Neurophotonics Center
+
+.define PUBLIC STEP_PIN 3 
+.define PUBLIC TRANS_VAL_IRQ 4
+.define PUBLIC FINAL_VAL_IRQ 5
+.define PUBLIC ACQ_IRQ 6
+
+
+// -- PIO program to set the LED select pins --
+// At a state transition it will enable the dummy load, lower the current,
+// then select the new LED, then change current to the desired value, 
+// then disable the dummy load.
+// LED_AD[0..3], LED_ENN pins use the output pins
+// DUMMY_EN uses the set pin
+
+.program led_sel_fsm
+pgm_start:
+.wrap_target
+    wait 0 GPIO STEP_PIN
+    wait 1 GPIO STEP_PIN    // step pin rising edge
+PUBLIC load_new_vals:
+    set PINS, 1             // enable dummy load
+    irq nowait TRANS_VAL_IRQ
+    wait 1 irq ACQ_IRQ
+    mov y, isr              // load delay value
+trans_delay_loop:
+    jmp y-- trans_delay_loop // delay for dac and dummy settling
+    pull noblock            // load new pin settings and wait a bit for DAC to settle
+    out PINS, 5             // output new set of led select values to mux
+    irq nowait FINAL_VAL_IRQ
+    wait 1 irq ACQ_IRQ [25]
+    set PINS, 0             // disable dummy load
+.wrap
+
+
+// -- PIO program to set DAC values --
+// CSn uses the set pin
+// SCLK uses the side-set pin
+// MOSI uses the out pin
+// DAC transition val is stored in 'x' manually before pgm start
+.program led_dac_fsm
+.side_set 1
+pgm_start:
+.wrap_target
+// transition value section
+    mov OSR, x  side 0        // pre-load OSR with dac transition value
+    wait 1 irq TRANS_VAL_IRQ side 0
+    set PINS, 0 side 0 [1]     // assert CSn
+bit_loop_trans:
+    out PINS, 1 side 1 [1]     // shift out bit and SCLK high
+    jmp !OSRE bit_loop_trans side 0 [1]
+    set PINS, 1 side 0         // deassert CSn
+    irq nowait ACQ_IRQ side 0
+// final value section
+    pull noblock side 0        // pre-load OSR with final transition value
+    wait 1 irq FINAL_VAL_IRQ side 0
+    set PINS, 0 side 0 [1]     // assert CSn
+bit_loop_final:
+    out PINS, 1 side 1 [1]     // shift out bit and SCLK high
+    jmp !OSRE bit_loop_final side 0 [1]
+    set PINS, 1 side 0         // deassert CSn
+    irq nowait ACQ_IRQ side 0
+.wrap
+
+    
+% c-sdk {
+
+void led_sel_fsm_program_init(PIO pio, uint sm, uint offset, uint dummy_en_pin, uint led_ad_pin0, uint32_t trans_delay) {
+    pio_sm_config c = led_sel_fsm_program_get_default_config(offset);
+    sm_config_set_set_pins(&c, dummy_en_pin, 1);
+    sm_config_set_out_pins(&c, led_ad_pin0, 5); //LED_AD[0..3], LED_ENN
+
+    sm_config_set_out_shift(&c, true, false, 32); // shift right, autopull off
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX); // don't need rx fifo
+
+    sm_config_set_clkdiv_int_frac(&c, 1, 0);
+
+    pio_gpio_init(pio, dummy_en_pin);
+    for (uint ip=0; ip<4; ip++){
+        pio_gpio_init(pio, led_ad_pin0+ip);
+    }
+    //pio_gpio_init(pio, led_ad_pin0+4); //LED_ENN_PIN do this in main pgm
+
+    pio_sm_set_consecutive_pindirs(pio, sm, dummy_en_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, led_ad_pin0, 5, true);
+
+    pio_sm_clear_fifos(pio, sm);
+
+    pio_sm_init(pio, sm, offset, &c); // load config into sm
+
+    // load transition delay value into 'isr' register
+    pio_sm_put(pio, sm, trans_delay);
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false));
+    pio_sm_exec(pio, sm, pio_encode_mov(pio_isr, pio_osr));
+    // ensure dummy load is disabled
+    pio_sm_exec(pio, sm, pio_encode_set(pio_pins, 0));          
+    // pre-load X with a safe value - LED_ENN high
+    // 'pull' will copy X to OSR if FIFO is empty
+    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 0b10000));
+    // output safe value to pins
+    pio_sm_exec(pio, sm, pio_encode_mov(pio_osr, pio_x));
+    pio_sm_exec(pio, sm, pio_encode_out(pio_pins, 5));
+}
+
+void led_dac_fsm_program_init(PIO pio, uint sm, uint offset, uint csn_pin, uint sclk_pin, uint mosi_pin, uint32_t dac_trans_val) {
+    pio_sm_config c = led_dac_fsm_program_get_default_config(offset);
+    sm_config_set_set_pins(&c, csn_pin, 1);
+    sm_config_set_sideset_pins(&c, sclk_pin);
+    sm_config_set_out_pins(&c, mosi_pin, 1);
+
+    sm_config_set_out_shift(&c, false, false, 24); // shift left, autopull off
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX); // don't need rx fifo
+
+    sm_config_set_clkdiv_int_frac(&c, 1, 0);
+
+    pio_gpio_init(pio, csn_pin);
+    pio_gpio_init(pio, sclk_pin);
+    pio_gpio_init(pio, mosi_pin);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, csn_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, sclk_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, mosi_pin, 1, true);
+
+    pio_sm_clear_fifos(pio, sm);
+
+    pio_sm_init(pio, sm, offset, &c); // load config into sm
+
+    // load dac transition value into 'x' register
+    pio_sm_put(pio, sm, dac_trans_val);
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false) | pio_encode_sideset(false, false));
+    pio_sm_exec(pio, sm, pio_encode_mov(pio_x, pio_osr) | pio_encode_sideset(false, false));
+    // deassert CSn pin (pin high)
+    pio_sm_exec(pio, sm, pio_encode_set(pio_pins, 1) | pio_encode_sideset(false, false));
+
+
+}
+
+%}
+
+
