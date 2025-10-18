@@ -1,0 +1,3 @@
+all plug-in card connectors: Harting 15210402401000 Qty: 30
+all control card connectors (Jx04): Harting 15150402601000 Qty: 5 
+all other connectors: DNP
